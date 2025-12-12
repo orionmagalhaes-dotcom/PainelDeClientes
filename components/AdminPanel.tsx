@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { AppCredential, ClientDBRow } from '../types';
 import { fetchCredentials, saveCredential, deleteCredential, getUsersCountForCredential, getClientsAssignedToCredential } from '../services/credentialService';
 import { getAllClients, saveClientToDB, deleteClientFromDB, resetAllClientPasswords, verifyAdminLogin, getTestUser, createDemoClient, getSystemConfig, saveSystemConfig, SystemConfig, getRotationalTestPassword } from '../services/clientService';
-import { Plus, Trash2, Edit2, LogOut, Eye, Users, Save, RefreshCw, Search, AlertTriangle, X, Check, DollarSign, ShieldAlert, TestTube, Unlock, Ban, Calendar, User as UserIcon, Sparkles, Megaphone, Clock, ArrowDownUp, Filter, ChevronDown, ChevronUp, Layers, ArrowUpAZ } from 'lucide-react';
+import { Plus, Trash2, Edit2, LogOut, Eye, Users, Save, RefreshCw, Search, AlertTriangle, X, Check, DollarSign, ShieldAlert, TestTube, Unlock, Ban, Calendar, User as UserIcon, Sparkles, Megaphone, Clock, ArrowDownUp, Filter, ChevronDown, ChevronUp, Layers, ArrowUpAZ, Loader2 } from 'lucide-react';
 
 interface AdminPanelProps {
   onLogout: () => void;
@@ -258,9 +258,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout }) => {
   const confirmDelete = async () => {
       if (!deleteModal.id) return;
       setIsDeleting(true);
-      if (deleteModal.type === 'credential') await deleteCredential(deleteModal.id);
-      else await deleteClientFromDB(deleteModal.id);
+      if (deleteModal.type === 'credential') {
+          await deleteCredential(deleteModal.id);
+      } else {
+          await deleteClientFromDB(deleteModal.id);
+      }
+      
+      // Delay to ensure DB propagates
+      await new Promise(r => setTimeout(r, 500));
       await loadData();
+      
       setIsDeleting(false);
       setDeleteModal({ open: false, type: 'credential', id: null });
   };
@@ -559,10 +566,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout }) => {
                                     </div>
                                 </div>
 
-                                {/* EXPANDED DETAILS - List of Subscriptions */}
+                                {/* EXPANDED DETAILS - List of Subscriptions (SCROLLABLE FIX) */}
                                 {isExpanded && (
-                                    <div className="bg-gray-50 border-t border-gray-200 p-2">
-                                        <table className="w-full text-sm text-left">
+                                    <div className="bg-gray-50 border-t border-gray-200 p-2 overflow-x-auto">
+                                        <table className="w-full text-sm text-left min-w-[500px]">
                                             <thead className="text-xs text-gray-400 uppercase font-bold">
                                                 <tr>
                                                     <th className="p-3 pl-4">Apps</th>
@@ -665,9 +672,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout }) => {
              </div>
         )}
 
-        {/* ... DANGER & MODALS (Client Modal / Delete Modal) - No changes needed ... */}
+        {/* ... DANGER ZONE ... */}
         {activeTab === 'danger' && ( <div className="bg-red-50 p-6 rounded-2xl border-2 border-red-100"> <div className="flex items-center gap-3 mb-6"><div className="bg-red-100 p-3 rounded-full"><ShieldAlert className="w-8 h-8 text-red-600" /></div><div><h2 className="text-2xl font-black text-red-900">Zona de Perigo</h2><p className="text-red-700">Ações irreversíveis.</p></div></div> <div className="bg-white p-6 rounded-xl border border-red-200 shadow-sm"><h3 className="font-bold text-lg text-gray-900 mb-2">Resetar TODAS as Senhas</h3><p className="text-sm text-gray-500 mb-4">Isso removerá a senha definida por todos os clientes.</p>{nuclearStep === 0 && <button onClick={() => setNuclearStep(1)} className="bg-red-600 text-white font-bold py-3 px-6 rounded-xl hover:bg-red-700">Iniciar Reset Geral</button>}{nuclearStep === 1 && (<div className="space-y-3 animate-fade-in"><p className="font-bold text-red-600">Digite "CONFIRMAR":</p><input type="text" className="w-full border-2 border-red-300 rounded-lg p-2 font-bold text-red-900 uppercase" value={nuclearInput} onChange={e => setNuclearInput(e.target.value.toUpperCase())} />{nuclearInput === 'CONFIRMAR' && (<><p className="font-bold text-gray-700 mt-2">Senha ADMIN:</p><input type="password" className="w-full border-2 border-gray-300 rounded-lg p-2" value={adminPassInput} onChange={e => setAdminPassInput(e.target.value)} /><div className="flex gap-3 mt-4"><button onClick={() => setNuclearStep(0)} className="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg">Cancelar</button><button onClick={handleNuclearReset} disabled={nuclearLoading} className="bg-red-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-red-700 flex items-center">{nuclearLoading ? <RefreshCw className="w-4 h-4 animate-spin mr-2"/> : <Ban className="w-4 h-4 mr-2"/>} EXECUTAR RESET</button></div></>)}</div>)}</div></div> )}
-        {/* ... Client Modal Code kept as is ... */}
+        
+        {/* ... CLIENT MODAL ... */}
         {clientModal.open && (
             <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
                 <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-8 animate-fade-in-up max-h-[90vh] overflow-y-auto relative">
@@ -696,6 +704,45 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ onLogout }) => {
                         <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-bold text-gray-500 uppercase mb-1 flex items-center"><Clock className="w-3 h-3 mr-1" /> Data Início (Geral)</label><input type="datetime-local" className="w-full bg-gray-50 text-gray-900 border-0 rounded-xl p-3.5 font-mono text-sm" value={clientForm.purchase_date} onChange={e => setClientForm({...clientForm, purchase_date: e.target.value})} /></div><div><label className="block text-xs font-bold text-gray-500 uppercase mb-1 flex items-center"><Calendar className="w-3 h-3 mr-1" /> Plano (Duração)</label><select className="w-full bg-gray-50 text-gray-900 border-0 rounded-xl p-3.5 focus:ring-2 focus:ring-primary-500 font-bold" value={clientForm.duration_months} onChange={e => setClientForm({...clientForm, duration_months: parseInt(e.target.value)})}> <option value={1}>1 Mês (Mensal)</option> <option value={2}>2 Meses</option> <option value={3}>3 Meses (Trimestral)</option> <option value={6}>6 Meses (Semestral)</option> <option value={12}>1 Ano (Anual)</option> <option value={999}>Vitalício / Demo</option> </select></div></div>
                         <div className="space-y-3"><div className="flex items-center gap-3 p-4 bg-red-50 rounded-xl border border-red-100 cursor-pointer hover:bg-red-100 transition-colors" onClick={() => setClientForm({...clientForm, is_debtor: !clientForm.is_debtor})}><div className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${clientForm.is_debtor ? 'bg-red-600 border-red-600' : 'bg-white border-red-200'}`}> {clientForm.is_debtor && <Check className="w-4 h-4 text-white" />} </div><span className="text-red-900 font-bold text-sm">Cliente Inadimplente (Bloquear Acesso)</span></div><div className="flex items-center gap-3 p-4 bg-yellow-50 rounded-xl border border-yellow-100 cursor-pointer hover:bg-yellow-100 transition-colors" onClick={() => setClientForm({...clientForm, override_expiration: !clientForm.override_expiration})}><div className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${clientForm.override_expiration ? 'bg-yellow-500 border-yellow-500' : 'bg-white border-yellow-200'}`}> {clientForm.override_expiration && <Check className="w-4 h-4 text-white" />} </div><div><span className="text-yellow-900 font-bold text-sm block">Liberar Acesso (Vencido)</span></div></div></div>
                         <button onClick={handleSaveClient} className="w-full bg-gray-900 text-white font-bold py-4 rounded-xl hover:bg-black flex justify-center items-center shadow-lg mt-2"> {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : 'Salvar no Banco de Dados'} </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* --- DELETE MODAL (FIXED) --- */}
+        {deleteModal.open && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-bounce-in border-t-8 border-red-500">
+                    <div className="flex flex-col items-center text-center space-y-4">
+                        <div className="bg-red-100 p-4 rounded-full">
+                            <Trash2 className="w-10 h-10 text-red-600" />
+                        </div>
+                        
+                        <h3 className="text-xl font-extrabold text-gray-900">
+                            Confirmar Exclusão
+                        </h3>
+                        <p className="text-gray-600 text-sm">
+                            {deleteModal.type === 'credential' ? 'Você vai apagar esta credencial. Os clientes vinculados perderão o acesso.' : 'Você vai remover este cliente do banco de dados.'}
+                            <br/>
+                            <span className="font-bold text-red-600">Essa ação é permanente.</span>
+                        </p>
+
+                        <div className="flex gap-3 w-full pt-2">
+                            <button 
+                                onClick={() => setDeleteModal({ ...deleteModal, open: false })}
+                                disabled={isDeleting}
+                                className="flex-1 bg-gray-200 text-gray-800 font-bold py-3 rounded-xl hover:bg-gray-300 transition-colors text-sm"
+                            >
+                                Cancelar
+                            </button>
+                            <button 
+                                onClick={confirmDelete}
+                                disabled={isDeleting}
+                                className="flex-1 bg-red-600 text-white font-bold py-3 rounded-xl hover:bg-red-700 transition-colors flex justify-center items-center shadow-lg text-sm"
+                            >
+                                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Sim, Apagar"}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

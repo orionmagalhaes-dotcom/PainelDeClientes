@@ -2,8 +2,8 @@
 import React, { useEffect, useState } from 'react';
 import { User, AppCredential } from '../types';
 import { getAssignedCredential } from '../services/credentialService';
-import { getSystemConfig, SystemConfig, updateClientPreferences } from '../services/clientService';
-import { CheckCircle, AlertCircle, Copy, RefreshCw, Check, Lock, CreditCard, ChevronRight, Star, Cast, Gamepad2, Rocket, X, Megaphone, Calendar, Clock, Crown, Zap, Palette, Upload, Image, Sparkles, Gift, AlertTriangle, Loader2, PlayCircle, Smartphone, Tv, ShoppingCart, RotateCw } from 'lucide-react';
+import { getSystemConfig, SystemConfig, updateClientPreferences, updateClientName, getAllClients } from '../services/clientService';
+import { CheckCircle, AlertCircle, Copy, RefreshCw, Check, Lock, CreditCard, ChevronRight, Star, Cast, Gamepad2, Rocket, X, Megaphone, Calendar, Clock, Crown, Zap, Palette, Upload, Image, Sparkles, Gift, AlertTriangle, Loader2, PlayCircle, Smartphone, Tv, ShoppingCart, RotateCw, Camera, Edit2 } from 'lucide-react';
 
 interface DashboardProps {
   user: User;
@@ -152,9 +152,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onOpenSupport, onOpenChecko
   const [themeColor, setThemeColor] = useState(user.themeColor || COLORS[0].class);
   const [bgImage, setBgImage] = useState(user.backgroundImage || '');
   const [profileImage, setProfileImage] = useState(user.profileImage || '');
+  
+  // Name Editing State
+  const [userName, setUserName] = useState(user.name || 'Dorameira');
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState('');
 
   const getServiceName = (serviceString: string) => serviceString.split('|')[0].trim();
-  const isDemoUser = user.phoneNumber.startsWith('99999') || user.phoneNumber === '00000000000';
   const starsCount = Math.floor((user.completed?.length || 0) / 10);
   const userServicesLower = user.services.map(s => getServiceName(s).toLowerCase());
   const missingServices = SERVICE_CATALOG.filter(s => !userServicesLower.some(us => us.includes(s.id.toLowerCase())));
@@ -162,6 +166,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onOpenSupport, onOpenChecko
   const activeTheme = COLORS.find(c => c.class === themeColor) || COLORS[0];
   const bgStyle = bgImage ? { backgroundImage: `url(${bgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' } : {}; 
   const containerClass = bgImage ? 'bg-black/50 min-h-screen pb-32 backdrop-blur-sm' : `${activeTheme.bgClass} min-h-screen pb-32 transition-colors duration-500 will-change-contents`;
+
+  // Identificação do Usuário Demo (99999...) vs Teste Grátis (0000...)
+  const isDemoAccount = user.phoneNumber.startsWith('99999');
+  
+  useEffect(() => {
+      setUserName(user.name || 'Dorameira');
+      setProfileImage(user.profileImage || '');
+  }, [user]);
 
   const calculateSubscriptionStatus = (serviceName: string) => {
       const cleanKey = getServiceName(serviceName);
@@ -186,15 +198,29 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onOpenSupport, onOpenChecko
   useEffect(() => {
     const loadCreds = async () => {
       setLoadingCreds(true);
-      const conf = await getSystemConfig();
-      setSysConfig(conf);
-      const results = await Promise.all(user.services.map(async (rawService) => {
-        const name = getServiceName(rawService);
-        const result = await getAssignedCredential(user, name);
-        return { service: rawService, cred: result.credential, alert: result.alert, daysActive: result.daysActive || 0 };
-      }));
-      setAssignedCredentials(results);
-      setLoadingCreds(false);
+      
+      try {
+          // PERFORMANCE FIX: Busca todos os clientes UMA vez para calcular as filas
+          const [conf, allClients] = await Promise.all([
+              getSystemConfig(),
+              getAllClients()
+          ]);
+          
+          setSysConfig(conf);
+          
+          const results = await Promise.all(user.services.map(async (rawService) => {
+            const name = getServiceName(rawService);
+            // Passa a lista allClients para evitar que a função busque tudo de novo para cada serviço
+            const result = await getAssignedCredential(user, name, allClients);
+            return { service: rawService, cred: result.credential, alert: result.alert, daysActive: result.daysActive || 0 };
+          }));
+          
+          setAssignedCredentials(results);
+      } catch(e) {
+          console.error("Erro carregando dashboard", e);
+      } finally {
+          setLoadingCreds(false);
+      }
     };
     loadCreds();
   }, [user]);
@@ -231,6 +257,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onOpenSupport, onOpenChecko
       }
   };
 
+  const handleSaveName = async () => {
+      if (!tempName.trim()) return;
+      setIsEditingName(false);
+      setUserName(tempName); // Optimistic UI update
+      
+      // Update local and remote
+      updateLocalSession({ name: tempName });
+      await updateClientName(user.phoneNumber, tempName);
+  };
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -265,18 +301,49 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onOpenSupport, onOpenChecko
       {/* HEADER - CLEANER & LARGER */}
       <div className="flex justify-between items-center px-5 pt-6 pb-2">
           <div className="flex items-center gap-5 w-full">
+              {/* PROFILE IMAGE with Edit Button */}
               <div className="relative group shrink-0">
-                  <div className={`w-20 h-20 rounded-full overflow-hidden border-4 border-white shadow-xl cursor-pointer transform group-hover:scale-105 transition-transform relative ring-4 ring-pink-300`}>
+                  <div className={`w-20 h-20 rounded-full overflow-hidden border-4 border-white shadow-xl relative ring-4 ring-pink-300`}>
                       <img src={profileImage || `https://ui-avatars.com/api/?name=${user.name}&background=random`} alt="Profile" className="w-full h-full object-cover will-change-transform" />
                       {uploadingImage && <div className="absolute inset-0 bg-black/50 flex items-center justify-center"><Loader2 className="w-8 h-8 text-white animate-spin" /></div>}
-                      <label className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer transition-opacity rounded-full"><Upload className="w-8 h-8 text-white" /><input type="file" className="hidden" accept="image/*" onChange={handleProfileUpload} /></label>
+                      
+                      {/* Hidden Input wrapped in full size label for clickability */}
+                      <label className="absolute inset-0 cursor-pointer">
+                          <input type="file" className="hidden" accept="image/*" onChange={handleProfileUpload} />
+                      </label>
+                  </div>
+                  {/* Visual Camera Icon Badge */}
+                  <div className="absolute -bottom-1 -right-1 bg-white p-1.5 rounded-full shadow-md border border-gray-200 pointer-events-none text-pink-600">
+                      <Camera className="w-4 h-4" />
                   </div>
               </div>
+
               <div className="flex flex-col flex-1 min-w-0 justify-center">
-                  {/* User Name with LARGER FONT */}
-                  <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 tracking-tighter drop-shadow-sm flex items-center truncate font-serif italic py-1">
-                    {user.name || 'Dorameira'} <Sparkles className="w-6 h-6 ml-2 text-yellow-400 fill-yellow-400 animate-spin-slow flex-shrink-0"/>
-                  </h1>
+                  {/* User Name with Inline Editing */}
+                  {isEditingName ? (
+                      <div className="flex items-center gap-2 py-1">
+                          <input 
+                              type="text" 
+                              className="w-full bg-white/90 border-2 border-pink-300 rounded-lg px-2 py-1 text-lg font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-500 shadow-lg"
+                              value={tempName}
+                              onChange={(e) => setTempName(e.target.value)}
+                              autoFocus
+                              maxLength={20}
+                          />
+                          <button onClick={handleSaveName} className="p-2 bg-green-500 hover:bg-green-600 text-white rounded-lg shadow-md transition-colors"><Check className="w-5 h-5"/></button>
+                          <button onClick={() => setIsEditingName(false)} className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg shadow-md transition-colors"><X className="w-5 h-5"/></button>
+                      </div>
+                  ) : (
+                      <div className="flex items-center gap-2 group/name cursor-pointer py-1" onClick={() => { setTempName(userName); setIsEditingName(true); }}>
+                          <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 tracking-tighter drop-shadow-sm flex items-center truncate font-serif italic">
+                            {userName}
+                          </h1>
+                          <Sparkles className="w-5 h-5 text-yellow-400 fill-yellow-400 animate-spin-slow flex-shrink-0"/>
+                          <div className="opacity-50 group-hover/name:opacity-100 transition-opacity p-1 bg-white/30 rounded-full hover:bg-white/50">
+                              <Edit2 className="w-4 h-4 text-gray-600" />
+                          </div>
+                      </div>
+                  )}
                   
                   {/* Badges Row */}
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -290,7 +357,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onOpenSupport, onOpenChecko
                           </div>
                       </div>
                       
-                      {/* RESTYLED STAR BADGE - EQUALIZED PROPORTIONS WITH SLIGHTLY LARGER ICON */}
+                      {/* RESTYLED STAR BADGE */}
                       <button 
                         onClick={() => setShowStarInfo(true)} 
                         className="relative w-max group active:scale-95 transition-transform" 
@@ -329,7 +396,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onOpenSupport, onOpenChecko
           <div className="mx-4 mt-2 bg-white p-4 rounded-2xl shadow-xl border-2 border-gray-100 animate-fade-in-up relative z-20">
               <div className="flex justify-between items-center mb-3"><h3 className="font-bold text-gray-800 text-sm">Personalizar Fundo</h3><button onClick={() => setShowPalette(false)}><X className="w-4 h-4 text-gray-400"/></button></div>
               <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-                  {COLORS.map(c => <button key={c.name} onClick={() => handleThemeChange(c.class)} className={`w-10 h-10 rounded-full flex-shrink-0 border-2 shadow-lg transition-all duration-300 ${c.class} ${themeColor === c.class ? 'border-white ring-2 ring-gray-900 scale-110 brightness-75' : 'border-transparent hover:scale-105'}`} title={c.name}></button>)}
+                  {COLORS.map(c => <button key={c.name} onClick={() => handleThemeChange(c.class)} className={`w-10 h-10 rounded-full flex-shrink-0 border-2 shadow-lg transition-all duration-300 ${c.class} ${themeColor === c.class ? 'border-white ring-2 ring-gray-900 scale-110 brightness-50' : 'border-transparent hover:scale-105'}`} title={c.name}></button>)}
                   <label className="w-10 h-10 rounded-full flex-shrink-0 border-2 border-gray-200 flex items-center justify-center cursor-pointer bg-gray-50 hover:bg-gray-100" title="Enviar Foto Fundo">{uploadingImage ? <Loader2 className="w-5 h-5 text-pink-500 animate-spin" /> : <Image className="w-5 h-5 text-gray-500" />}<input type="file" className="hidden" accept="image/*" onChange={handleBgUpload} disabled={uploadingImage} /></label>
                   {bgImage && <button onClick={() => {setBgImage(''); updateClientPreferences(user.phoneNumber, {backgroundImage: ''}); updateLocalSession({backgroundImage: ''}); }} className="text-xs text-red-500 font-bold ml-2 whitespace-nowrap">Remover Foto</button>}
               </div>
@@ -423,8 +490,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onOpenSupport, onOpenChecko
                {!loadingCreds && !assignedCredentials.some(c => c.cred) && <p className="text-gray-500 text-sm bg-white p-6 rounded-xl text-center border border-gray-200 shadow-sm">Aguardando liberação de acesso.</p>}
                {assignedCredentials.map(({ service, cred, daysActive }, idx) => {
                  const name = getServiceName(service);
-                 const displayEmail = isDemoUser ? 'demo@eudorama.com' : cred?.email;
-                 const displayPass = isDemoUser ? 'demo1234' : cred?.password;
+                 
+                 // Lógica de Exibição Separada: 
+                 // Demo (99999...) -> Falso
+                 // Teste Grátis (0000...) -> Real
+                 const displayEmail = isDemoAccount ? `demo_${name.toLowerCase()}@eudorama.com` : (cred?.email || 'Sem Acesso');
+                 const displayPass = isDemoAccount ? 'demo1234' : (cred?.password || '---');
+                 
                  const status = getCredentialStatus(name, daysActive);
                  const { isBlocked, daysLeft } = calculateSubscriptionStatus(service);
                  let dotColorClass = "bg-green-500"; if (daysLeft < 0) dotColorClass = "bg-gray-900"; else if (daysLeft <= 2) dotColorClass = "bg-red-600";

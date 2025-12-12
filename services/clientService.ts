@@ -71,19 +71,20 @@ export const getTestUser = async (): Promise<{ user: User | null, error: string 
 
 /**
  * Verifica se o usuário existe e se já tem senha configurada.
- * Implementa lógica de "Self-Healing": Se encontrar registros do mesmo número onde um tem senha e o outro não, unifica.
+ * Retorna também dados básicos de perfil para a UI de Login.
  */
 export const checkUserStatus = async (lastFourDigits: string): Promise<{ 
   exists: boolean; 
   hasPassword: boolean; 
-  phoneMatches: string[] 
+  phoneMatches: string[];
+  profile?: { name?: string; photo?: string; }
 }> => {
   try {
     if (!supabase) return { exists: false, hasPassword: false, phoneMatches: [] };
 
     const { data, error } = await supabase
       .from('clients')
-      .select('id, phone_number, client_password, deleted')
+      .select('phone_number, client_password, client_name, profile_image, deleted')
       .like('phone_number', `%${lastFourDigits}`);
 
     if (error || !data || data.length === 0) {
@@ -91,7 +92,7 @@ export const checkUserStatus = async (lastFourDigits: string): Promise<{
       const foundMock = MOCK_DB_CLIENTS.filter(c => c.phone_number.endsWith(lastFourDigits));
       if (foundMock.length > 0) {
          if (foundMock[0].deleted) return { exists: false, hasPassword: false, phoneMatches: [] };
-         return { exists: true, hasPassword: false, phoneMatches: [foundMock[0].phone_number] };
+         return { exists: true, hasPassword: false, phoneMatches: [foundMock[0].phone_number], profile: { name: foundMock[0].client_name } };
       }
       return { exists: false, hasPassword: false, phoneMatches: [] };
     }
@@ -103,45 +104,21 @@ export const checkUserStatus = async (lastFourDigits: string): Promise<{
        return { exists: false, hasPassword: false, phoneMatches: [] };
     }
 
-    // --- LÓGICA DE SINCRONIZAÇÃO DE SENHA (SELF-HEALING) ---
-    // Agrupa registros pelo número de telefone exato
-    const usersByPhone: Record<string, typeof activeClients> = {};
-    activeClients.forEach(client => {
-        if (!usersByPhone[client.phone_number]) usersByPhone[client.phone_number] = [];
-        usersByPhone[client.phone_number].push(client);
-    });
+    // Lógica de Senha Global (Self-Healing) e Perfil
+    const hasPass = activeClients.some(row => row.client_password && row.client_password.trim() !== '');
+    const phones = Array.from(new Set(activeClients.map(d => d.phone_number as string)));
+    
+    // Pega o perfil do registro mais completo (que tem foto ou nome)
+    const profileRecord = activeClients.find(r => r.profile_image && r.client_name) || 
+                          activeClients.find(r => r.client_name) || 
+                          activeClients[0];
 
-    const phones = Object.keys(usersByPhone);
-    let hasPassGlobal = false;
+    const profile = {
+        name: profileRecord?.client_name,
+        photo: profileRecord?.profile_image
+    };
 
-    // Itera sobre cada número de telefone único encontrado
-    for (const phone of phones) {
-        const records = usersByPhone[phone];
-        
-        // Verifica se existe ALGUM registro com senha válida para este número
-        const sourceRecord = records.find(r => r.client_password && r.client_password.trim() !== '');
-        
-        if (sourceRecord) {
-            hasPassGlobal = true; // Se achou senha em qualquer registro, o usuário tem senha
-            const passwordToSync = sourceRecord.client_password;
-            
-            // Identifica registros DO MESMO NÚMERO que estão SEM senha
-            const missingPasswordIds = records
-                .filter(r => !r.client_password || r.client_password.trim() === '')
-                .map(r => r.id);
-
-            // Se houver registros inconsistentes (sem senha), atualiza eles no banco agora
-            if (missingPasswordIds.length > 0) {
-                console.log(`Sincronizando senha para ${missingPasswordIds.length} registros do telefone ${phone}`);
-                await supabase
-                    .from('clients')
-                    .update({ client_password: passwordToSync })
-                    .in('id', missingPasswordIds);
-            }
-        }
-    }
-
-    return { exists: true, hasPassword: hasPassGlobal, phoneMatches: phones };
+    return { exists: true, hasPassword: hasPass, phoneMatches: phones, profile };
 
   } catch (e) {
     console.error(e);

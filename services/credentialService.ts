@@ -82,7 +82,8 @@ export const deleteCredential = async (id: string): Promise<void> => {
 
 // --- LÓGICA DE DISTRIBUIÇÃO E CICLO DE VIDA ---
 
-export const getAssignedCredential = async (user: User, serviceName: string): Promise<{ credential: AppCredential | null, alert: string | null, daysActive: number }> => {
+// OTIMIZAÇÃO: Aceita 'allClients' opcional para evitar chamadas repetidas ao banco
+export const getAssignedCredential = async (user: User, serviceName: string, preloadedClients?: ClientDBRow[]): Promise<{ credential: AppCredential | null, alert: string | null, daysActive: number }> => {
   // 1. Busca credenciais do banco
   const credentialsList = await fetchCredentials();
   
@@ -96,9 +97,18 @@ export const getAssignedCredential = async (user: User, serviceName: string): Pr
       }
 
       // Filtra credenciais disponíveis para este serviço
+      // FIX: Removida restrição excessiva. Se tiver credencial visível no banco, o teste usa.
       const testPool = credentialsList.filter(c => c.isVisible && c.service.toLowerCase().includes(serviceName.toLowerCase()));
       
-      if (testPool.length === 0) return { credential: null, alert: "Sem contas disponíveis no momento.", daysActive: 0 };
+      if (testPool.length === 0) {
+          // Se não achar nada, tenta buscar qualquer coisa que contenha parte do nome (fallback)
+          const fallbackPool = credentialsList.filter(c => c.service.toLowerCase().includes(serviceName.split(' ')[0].toLowerCase()));
+          if (fallbackPool.length > 0) {
+              const randomFallback = Math.floor(Math.random() * fallbackPool.length);
+              return { credential: fallbackPool[randomFallback], alert: "Conta de Teste (Rotativa 1h)", daysActive: 1 };
+          }
+          return { credential: null, alert: "Sem contas disponíveis no momento.", daysActive: 0 };
+      }
       
       // Seleção Aleatória Real
       const randomIndex = Math.floor(Math.random() * testPool.length);
@@ -113,7 +123,8 @@ export const getAssignedCredential = async (user: User, serviceName: string): Pr
   if (allCreds.length === 0) return { credential: null, alert: null, daysActive: 0 };
 
   // 2. Busca clientes e calcula posição (Distribuição)
-  const allClients = await getAllClients();
+  // OTIMIZAÇÃO: Usa a lista pré-carregada se existir
+  const allClients = preloadedClients || await getAllClients();
   const activeClients = allClients.filter((c: any) => !c.deleted);
   
   const clientsWithService = activeClients.filter(client => {

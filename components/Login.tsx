@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { User } from '../types';
-import { checkUserStatus, loginWithPassword, registerClientPassword, getTestUser, verifyAdminLogin, getRotationalTestPassword } from '../services/clientService';
+import { checkUserStatus, loginWithPassword, registerClientPassword, verifyAdminLogin, getRotationalTestPassword } from '../services/clientService';
 import { Loader2, Lock, AlertCircle, UserCheck, Shield, Sparkles, Play, ChevronRight, Star } from 'lucide-react';
 
 interface LoginProps {
@@ -10,15 +10,57 @@ interface LoginProps {
   onAdminLoginSuccess?: (remember: boolean) => void;
 }
 
+// --- TEMA E DESIGN SYSTEM (OTIMIZADO: SEM BLUR, CORES CLARAS) ---
+interface Theme {
+    name: string;
+    bgClass: string;
+    cardClass: string;
+    textClass: string;
+    subTextClass: string;
+    inputContainerClass: string;
+    inputTextClass: string;
+    inputPlaceholderClass: string;
+    buttonClass: string;
+    iconColor: string;
+    accentColor: string;
+    bgElement?: React.ReactNode;
+}
+
+const THEMES: Theme[] = [
+    {
+        name: "Original Aura (Light)",
+        // Fundo degradê bem suave e claro
+        bgClass: "bg-gradient-to-br from-pink-100 via-purple-100 to-indigo-100", 
+        // Card branco sólido sem blur
+        cardClass: "bg-white border border-pink-200 shadow-xl", 
+        // Texto escuro para contraste no fundo claro
+        textClass: "text-gray-800", 
+        subTextClass: "text-pink-600",
+        inputContainerClass: "bg-pink-50 border border-pink-200 focus-within:border-pink-400 focus-within:bg-white",
+        inputTextClass: "text-gray-900",
+        inputPlaceholderClass: "placeholder-pink-300",
+        buttonClass: "bg-pink-500 hover:bg-pink-600 text-white shadow-pink-200",
+        iconColor: "text-pink-500",
+        accentColor: "text-pink-600",
+        bgElement: (
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              {/* Elementos decorativos simples sem blur pesado */}
+              <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-pink-200 rounded-full opacity-40"></div>
+              <div className="absolute top-[60%] -right-[10%] w-[30%] h-[30%] bg-purple-200 rounded-full opacity-40"></div>
+          </div>
+        )
+    }
+];
+
 const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSuccess }) => {
   const [step, setStep] = useState<'identify' | 'password' | 'create_password'>('identify');
   
   // User Login State
   const [digits, setDigits] = useState('');
   const [fullPhoneFound, setFullPhoneFound] = useState('');
+  const [foundProfile, setFoundProfile] = useState<{name?: string, photo?: string} | null>(null);
   const [password, setPassword] = useState('');
   const [showAdmin, setShowAdmin] = useState(false);
-  const [loadingTest, setLoadingTest] = useState(false);
   
   // Admin inputs
   const [adminUser, setAdminUser] = useState('');
@@ -27,10 +69,12 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSucces
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Tema fixo (Padrão Claro)
+  const theme = THEMES[0];
+
   // --- HANDLERS ---
   
   const handleDigitsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      // Aceita apenas números e limita a 4 caracteres
       const val = e.target.value.replace(/\D/g, '').slice(0, 4);
       setDigits(val);
       if (error) setError('');
@@ -40,7 +84,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSucces
     e.preventDefault();
     setError('');
     
-    // Easter egg para admin
     if (digits === '0000') {
         setShowAdmin(true);
         return;
@@ -58,6 +101,14 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSucces
 
         if (status.exists && status.phoneMatches.length > 0) {
             setFullPhoneFound(status.phoneMatches[0]);
+            
+            // Set profile data if available
+            if (status.profile) {
+                setFoundProfile(status.profile);
+            } else {
+                setFoundProfile(null);
+            }
+
             if (status.hasPassword) {
                 setStep('password');
             } else {
@@ -76,18 +127,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSucces
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    
-    if (!password.trim()) {
-        setError('Digite a senha.');
-        return;
-    }
-
+    if (!password.trim()) { setError('Digite a senha.'); return; }
     setLoading(true);
+    // Determine if this is a test session based on the phone number
+    const isTest = fullPhoneFound === '00000000000';
+    
     const { user, error: loginError } = await loginWithPassword(fullPhoneFound, password);
     setLoading(false);
-
+    
     if (user) {
-        onLogin(user, true);
+        onLogin(user, true, isTest);
     } else {
         setError(loginError || 'Senha incorreta.');
     }
@@ -96,15 +145,9 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSucces
   const handleRegisterPassword = async (e: React.FormEvent) => {
       e.preventDefault();
       setError('');
-
-      if (password.length < 4) {
-          setError('Mínimo 4 dígitos.');
-          return;
-      }
-
+      if (password.length < 4) { setError('Mínimo 4 dígitos.'); return; }
       setLoading(true);
       const success = await registerClientPassword(fullPhoneFound, password);
-      
       if (success) {
           const { user } = await loginWithPassword(fullPhoneFound, password);
           setLoading(false);
@@ -116,17 +159,17 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSucces
       }
   };
 
-  const handleFreeTest = async () => {
-      setLoadingTest(true);
-      await new Promise(r => setTimeout(r, 800));
-      const { user } = await getTestUser();
-      setLoadingTest(false);
-      
-      if (user) {
-          onLogin(user, false, true);
-      } else {
-          setError('Teste indisponível.');
-      }
+  const handleFreeTest = () => {
+      // Configura o estado para o usuário de teste
+      setFullPhoneFound('00000000000');
+      setFoundProfile({ 
+          name: 'Teste Grátis', 
+          photo: 'https://ui-avatars.com/api/?name=Teste&background=random' 
+      });
+      // Avança para a tela de senha para EXIGIR a senha rotativa
+      setStep('password');
+      setDigits('');
+      setError('');
   };
 
   const handleAdminLogin = async (e: React.FormEvent) => {
@@ -136,19 +179,20 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSucces
           if (onAdminLoginSuccess) onAdminLoginSuccess(false);
           else onAdminClick();
       } else {
-          // Check for Test User Code
           const testPass = getRotationalTestPassword();
           if (adminPass.toUpperCase() === testPass) {
-               const { user } = await getTestUser();
+               // LOGIN COM SENHA DE TESTE VIA PAINEL ADMIN
+               setFullPhoneFound('00000000000');
+               const { user } = await loginWithPassword('00000000000', adminPass);
                if(user) onLogin(user, false, true);
+               else setError('Erro ao carregar usuário de teste.');
           } else {
               setError('Acesso negado.');
           }
       }
   };
 
-  // --- SCREEN RENDER ---
-
+  // --- RENDERIZAR TELA DE ADMIN ---
   if (showAdmin) {
       return (
           <div className="min-h-screen bg-gray-900 flex items-center justify-center p-6 font-sans">
@@ -168,51 +212,63 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSucces
       );
   }
 
+  // --- RENDERIZAR TELA DE LOGIN COM TEMA ---
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center font-sans px-4 relative overflow-hidden bg-gradient-to-br from-pink-900 via-rose-900 to-purple-900">
+    <div className={`min-h-screen flex flex-col items-center justify-center font-sans px-4 relative overflow-hidden transition-all duration-700 ${theme.bgClass}`}>
       
-      {/* Background Decor */}
-      <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
-          <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] bg-pink-600 rounded-full blur-[120px] opacity-30 animate-pulse"></div>
-          <div className="absolute top-[40%] -right-[10%] w-[40%] h-[40%] bg-purple-600 rounded-full blur-[100px] opacity-30 animate-pulse delay-700"></div>
-          <div className="absolute -bottom-[20%] left-[20%] w-[60%] h-[60%] bg-rose-600 rounded-full blur-[130px] opacity-20 animate-pulse delay-1000"></div>
+      {/* BACKGROUND ELEMENTS (Custom per theme) */}
+      {theme.bgElement}
+
+      {/* --- ADMIN LINK (TOP LEFT) --- */}
+      <div className="absolute top-4 left-4 z-50">
+          <button 
+            onClick={() => setShowAdmin(true)}
+            className={`text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all px-3 py-2 rounded-full opacity-60 hover:opacity-100 hover:bg-white/20 ${theme.subTextClass}`}
+          >
+            <Shield className="w-3 h-3" /> Área Restrita
+          </button>
       </div>
 
-      <div className="w-full max-w-sm bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl rounded-[2rem] p-6 space-y-6 animate-fade-in-up relative z-10">
+      <div className={`w-full max-w-sm p-8 space-y-6 animate-fade-in-up relative z-10 transition-all duration-500 ${theme.cardClass}`}>
         
         {/* LOGO AREA */}
-        <div className="text-center pt-1">
-            <div className="flex items-center justify-center gap-2 mb-1">
-                <div className="bg-gradient-to-tr from-pink-500 to-rose-400 p-2 rounded-xl shadow-lg shadow-pink-900/40 animate-bounce">
-                    <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+        <div className="text-center pt-2">
+            <div className="flex items-center justify-center gap-2 mb-2">
+                <div className={`p-2.5 rounded-xl shadow-md animate-bounce ${theme.iconColor.includes('text-white') ? 'bg-white/20' : 'bg-current/10'} ${theme.iconColor}`}>
+                    <Play className="w-6 h-6 fill-current" />
                 </div>
-                <h1 className="text-2xl font-black text-white tracking-tighter drop-shadow-md">
-                    Eu<span className="text-pink-200">Dorama</span>
+                <h1 className={`text-3xl font-black tracking-tighter drop-shadow-sm ${theme.textClass}`}>
+                    Eu<span className={theme.accentColor.replace('text-', 'text-opacity-90 text-')}>Dorama</span>
                 </h1>
             </div>
-            <p className="text-pink-100/80 text-xs font-medium tracking-wide flex items-center justify-center gap-1">
-                <Sparkles className="w-3 h-3 text-yellow-300" /> Clube de Assinantes
+            <p className={`text-xs font-bold tracking-widest uppercase flex items-center justify-center gap-1 opacity-80 ${theme.subTextClass}`}>
+                <Sparkles className="w-3 h-3" /> Clube de Assinantes
             </p>
         </div>
 
         {step === 'identify' ? (
-            <form onSubmit={handleIdentify} className="space-y-5">
+            <form onSubmit={handleIdentify} className="space-y-6">
                 
-                <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-pink-200 uppercase tracking-widest block text-center opacity-80">
-                        Confirme seu número
-                    </label>
+                <div className="space-y-4">
+                    <div className="text-center space-y-1">
+                        <label className={`text-lg font-bold block leading-tight ${theme.textClass}`}>
+                            Use os 4 últimos dígitos do seu WhatsApp
+                        </label>
+                        <p className={`text-sm font-bold opacity-100 ${theme.subTextClass}`}>
+                            Ex: Se seu número é (88) 99999-<b>1234</b>, digite <b>1234</b>
+                        </p>
+                    </div>
                     
                     {/* INPUT COM MÁSCARA FIXA VISUAL */}
-                    <div className="bg-black/20 border border-white/10 rounded-xl p-3 flex items-center justify-center relative group focus-within:border-pink-300/50 focus-within:bg-black/30 transition-all">
-                        <span className="text-white/30 text-xl font-bold tracking-widest select-none font-mono">
+                    <div className={`rounded-xl p-4 flex items-center justify-center relative group transition-all ${theme.inputContainerClass}`}>
+                        <span className={`text-xl font-bold tracking-widest select-none font-mono opacity-40 ${theme.inputTextClass}`}>
                             (••) ••••• - 
                         </span>
                         <input
                             type="tel"
                             maxLength={4}
                             placeholder="____"
-                            className="w-20 bg-transparent text-center text-xl font-bold text-white outline-none placeholder-white/20 tracking-[0.2em] font-mono focus:placeholder-transparent ml-1"
+                            className={`w-24 bg-transparent text-center text-xl font-bold outline-none tracking-[0.2em] font-mono focus:placeholder-transparent ml-1 ${theme.inputTextClass} ${theme.inputPlaceholderClass}`}
                             value={digits}
                             onChange={handleDigitsChange}
                             autoFocus
@@ -221,86 +277,93 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSucces
                 </div>
 
                 {error && (
-                    <div className="flex items-center justify-center gap-2 text-white font-bold text-xs bg-red-500/20 border border-red-500/30 p-2.5 rounded-xl animate-pulse backdrop-blur-md">
+                    <div className="flex items-center justify-center gap-2 text-red-600 font-bold text-xs bg-red-50 border border-red-100 p-3 rounded-xl animate-pulse">
                         <AlertCircle className="w-4 h-4" /> {error}
                     </div>
                 )}
 
-                <div className="space-y-2">
+                <div className="space-y-3">
                     <button
                         type="submit"
                         disabled={loading || digits.length < 4}
-                        className="w-full bg-white hover:bg-pink-50 text-pink-900 font-black py-3.5 rounded-xl shadow-lg shadow-pink-900/20 transition-all active:scale-95 flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed group"
+                        className={`w-full font-black py-4 rounded-xl shadow-lg transition-all active:scale-95 flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed group ${theme.buttonClass}`}
                     >
                         {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Continuar <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform"/></>}
                     </button>
                     
-                    {/* Botão Teste Grátis */}
+                    {/* Botão Teste Grátis - Agora EXIGE SENHA */}
                     <button
                         type="button"
                         onClick={handleFreeTest}
-                        disabled={loadingTest}
-                        className="w-full py-3 font-bold text-xs text-pink-100 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all flex justify-center items-center gap-2 active:scale-95"
+                        className={`w-full py-3 font-bold text-xs rounded-xl transition-all flex justify-center items-center gap-2 active:scale-95 border border-dashed hover:border-solid ${theme.subTextClass} border-current opacity-70 hover:opacity-100`}
                     >
-                         {loadingTest ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Star className="w-3 h-3 text-yellow-300 fill-yellow-300" /> Quero testar grátis</>}
+                         <Star className="w-3 h-3 fill-current" /> Quero testar grátis
                     </button>
-                </div>
-
-                <div className="text-center">
-                     <p className="text-white/40 text-[9px] uppercase font-bold tracking-widest">
-                        Exemplo: (88) 99999-<span className="text-white">1234</span>
-                     </p>
                 </div>
 
             </form>
         ) : (
             // PASSWORD STEP
-            <form onSubmit={step === 'password' ? handleLoginSubmit : handleRegisterPassword} className="space-y-5 animate-slide-up">
+            <form onSubmit={step === 'password' ? handleLoginSubmit : handleRegisterPassword} className="space-y-6 animate-slide-up">
                 
-                <div className="text-center bg-black/20 p-3 rounded-xl border border-white/5 backdrop-blur-sm">
-                    <div className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-2">
-                        <UserCheck className="w-5 h-5 text-pink-200" />
-                    </div>
-                    <p className="text-[10px] text-pink-200 font-bold uppercase mb-0.5">Identificado como</p>
-                    <p className="font-bold text-lg text-white tracking-widest font-mono">••• •••• {fullPhoneFound.slice(-4)}</p>
+                <div className={`text-center p-4 rounded-xl border ${theme.inputContainerClass}`}>
+                    
+                    {/* CONDITIONAL PROFILE DISPLAY */}
+                    {foundProfile?.photo ? (
+                        <div className="w-20 h-20 rounded-full mx-auto mb-3 border-4 border-white/50 shadow-lg overflow-hidden">
+                            <img src={foundProfile.photo} alt="Profile" className="w-full h-full object-cover" />
+                        </div>
+                    ) : (
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-2 opacity-20 bg-current ${theme.iconColor}`}>
+                            <UserCheck className="w-6 h-6" />
+                        </div>
+                    )}
+
+                    <p className={`text-[10px] font-bold uppercase mb-1 opacity-60 ${theme.subTextClass}`}>Identificado como</p>
+                    
+                    {foundProfile?.name ? (
+                        <p className={`font-black text-xl tracking-tight ${theme.textClass}`}>{foundProfile.name}</p>
+                    ) : (
+                        <p className={`font-bold text-lg tracking-widest font-mono ${theme.textClass}`}>••• •••• {fullPhoneFound.slice(-4)}</p>
+                    )}
                 </div>
 
-                <div className="bg-black/20 rounded-xl p-3 border border-white/10 focus-within:border-pink-300/50 focus-within:bg-black/30 transition-all">
-                    <label className="block text-[10px] font-bold text-pink-200 uppercase mb-1 ml-1">
-                        {step === 'create_password' ? 'Crie sua senha de acesso' : 'Sua senha'}
+                <div className={`rounded-xl p-4 transition-all ${theme.inputContainerClass}`}>
+                    <label className={`block text-[10px] font-bold uppercase mb-2 ml-1 opacity-70 ${theme.subTextClass}`}>
+                        {step === 'create_password' ? 'Crie sua senha' : 'Sua senha'}
                     </label>
                     <div className="flex items-center">
-                        <Lock className="w-4 h-4 text-pink-200 mr-2 ml-1" />
+                        <Lock className={`w-5 h-5 mr-3 ml-1 opacity-50 ${theme.iconColor}`} />
                         <input
                             type="password"
-                            className="w-full bg-transparent font-bold text-xl text-white outline-none placeholder-white/10"
+                            className={`w-full bg-transparent font-bold text-xl outline-none ${theme.inputTextClass} ${theme.inputPlaceholderClass}`}
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             autoFocus
-                            placeholder="******"
+                            placeholder={fullPhoneFound === '00000000000' ? "Senha Rotativa" : "******"}
                         />
                     </div>
                 </div>
 
                 {error && (
-                    <div className="bg-red-500/20 border border-red-500/30 p-2.5 rounded-xl backdrop-blur-sm">
-                        <p className="text-white font-bold text-center text-xs">{error}</p>
+                    <div className="bg-red-50 border border-red-100 p-3 rounded-xl">
+                        <p className="text-red-600 font-bold text-center text-xs">{error}</p>
                     </div>
                 )}
 
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-3">
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full bg-white text-pink-900 font-black py-3.5 rounded-xl shadow-lg transition-transform active:scale-95 flex justify-center items-center gap-2"
+                        className={`w-full font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 flex justify-center items-center gap-2 ${theme.buttonClass}`}
                     >
                         {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (step === 'create_password' ? 'Definir Senha e Entrar' : <>Acessar Painel <UserCheck className="w-4 h-4"/></>)}
                     </button>
                     
                     <button 
                         type="button" 
-                        onClick={() => { setStep('identify'); setDigits(''); setPassword(''); setError(''); }}
-                        className="text-pink-200/70 font-bold text-xs py-2 hover:text-white transition-colors"
+                        onClick={() => { setStep('identify'); setDigits(''); setPassword(''); setError(''); setFoundProfile(null); }}
+                        className={`font-bold text-xs py-2 transition-colors hover:underline opacity-70 hover:opacity-100 ${theme.subTextClass}`}
                     >
                         Não sou este número
                     </button>
@@ -308,16 +371,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, onAdminClick, onAdminLoginSucces
             </form>
         )}
 
-      </div>
-      
-      {/* Footer Branding & Admin Link */}
-      <div className="absolute bottom-4 w-full flex flex-col items-center gap-2 z-10">
-          <button 
-            onClick={() => setShowAdmin(true)}
-            className="text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 text-white/30 hover:text-white transition-all bg-black/10 hover:bg-black/30 px-3 py-1.5 rounded-full backdrop-blur-sm"
-          >
-            <Shield className="w-3 h-3" /> Área Administrativa
-          </button>
       </div>
     </div>
   );
